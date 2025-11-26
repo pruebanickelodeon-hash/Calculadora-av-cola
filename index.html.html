@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Calculadora Avícola — Datos Reales (lb)</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+body{background:#f0f4f8;font-family:Arial,Helvetica,sans-serif;margin:0;padding:0}
+header{background:#0a7cff;padding:18px;text-align:center;color:white}
+.container{max-width:1000px;margin:18px auto;padding:12px}
+.card{background:white;padding:18px;margin-bottom:18px;border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,0.06)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:600px){.grid{grid-template-columns:1fr}}
+input,select{padding:8px;border-radius:6px;border:1px solid #ccc;width:100%;box-sizing:border-box}
+.btn{width:100%;padding:12px;background:#0a7cff;border:none;border-radius:8px;color:white;font-size:15px;cursor:pointer;margin-top:8px}
+.btn.secondary{background:#05a857}
+.phase-info{background:#eef6ff;padding:10px;border-radius:8px;margin-top:8px;font-size:13px;color:#174b7a}
+.small{font-size:13px;color:#333}
+canvas{margin-top:18px;width:100% !important;height:300px !important}
+.results-pre{background:#f7fbff;padding:10px;border-radius:8px;margin-bottom:8px}
+label.small{font-size:13px;color:#333;display:block;margin-bottom:6px}
+</style>
+</head>
+<body>
+<header><h1>🐔 Calculadora Avícola </h1></header>
+
+<div class="container" id="pantalla-inicial">
+  <section class="card">
+    <h2>Bienvenido</h2>
+    <div class="grid">
+      <div>
+        <label class="small">Nombre del Galpón</label>
+        <input id="nombreGalpon" placeholder="Ej: Galpón 1">
+      </div>
+      <div>
+        <label class="small">Línea Genética</label>
+        <select id="lineaGenetica">
+          <option value="cobb">Cobb 500 (REAL)</option>
+          <option value="ross">Ross 308 (REAL)</option>
+        </select>
+      </div>
+      <div>
+        <label class="small">Tipo Tabla</label>
+        <select id="tipoTabla"><option value="oficial">Oficial</option><option value="suavizado">Suavizado</option></select>
+      </div>
+      <div class="small" style="align-self:center">
+        <p class="small">Se usan los consumos diarios reales (g/ave convertidos a lb/ave). Aves vivas se distribuye linealmente para alcanzar la mortalidad total al final del ciclo.</p>
+      </div>
+    </div>
+    <button class="btn" onclick="iniciarCalculadora()">Ingresar</button>
+  </section>
+</div>
+
+<div class="container" id="calculadora" style="display:none">
+  <section class="card">
+    <h2>Datos del Lote</h2>
+    <div class="grid">
+      <div><label class="small">Aves Iniciales</label><input id="aves" type="number" placeholder="0"></div>
+      <div><label class="small">Días Totales del Ciclo (máx 43)</label><input id="dias" type="number" placeholder="0" min="1" max="43"></div>
+      <div><label class="small">Mortalidad Esperada (%)</label><input id="mort" type="number" placeholder="0"></div>
+      <div><label class="small">Precio del Pollito ($/DOP)</label><input id="precioPollito" type="number" step="0.01" placeholder="0"></div>
+      <div><label class="small">Peso Final por Ave (lb) — opcional</label><input id="pesoFinalAve" type="number" step="0.01" placeholder="Si vacío usa tabla (lb)"></div>
+      <div><label class="small"></label></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Precios (USD / lb)</h2>
+    <div class="grid">
+      <div><label class="small">Precio alimento (DOP / lb)</label><input id="precioAlimento" type="number" step="0.0001" placeholder="0"></div>
+      <div><label class="small">Precio pollo (venta) DOP/ lb)</label><input id="precioPollo" type="number" step="0.01" placeholder="0"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Consumo por Fases (lb)</h2>
+    <div class="grid">
+      <div><label class="small">Preinicio (<span id="diasPre">0 - 7</span>)</label><input id="consumoPre" readonly></div>
+      <div><label class="small">Inicio (<span id="diasIni">-</span>)</label><input id="consumoIni" readonly></div>
+      <div><label class="small">Crecimiento (<span id="diasCre">-</span>)</label><input id="consumoCre" readonly></div>
+      <div><label class="small">Engorde (<span id="diasEng">-</span>)</label><input id="consumoEng" readonly></div>
+    </div>
+    <div class="phase-info">Preinicio: día 0–7; Engorde: últimos 7 días; Centro dividido mitad/mitad entre Inicio y Crecimiento.</div>
+  </section>
+
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <button class="btn" onclick="calcular()">CALCULAR</button>
+    <button class="btn secondary" onclick="guardarLote()">GUARDAR LOTE</button>
+    <button class="btn secondary" onclick="generarPDF()">GENERAR REPORTE PDF</button>
+    <button class="btn secondary" onclick="limpiarCalculadora()">LIMPIAR</button>
+    <button class="btn secondary" onclick="volverMenu()">VOLVER</button>
+  </div>
+
+  <section class="card">
+    <h2>Resultados</h2>
+    <div id="resultados"></div>
+    <canvas id="graficaConsumo"></canvas>
+  </section>
+
+  <section class="card">
+    <h2>Lotes Guardados</h2>
+    <ul id="listaLotes"></ul>
+  </section>
+</div>
+
+<script>
+/* ---------- tablas reales en gramos (tal como me proporcionaste) ---------- */
+/* COBB 500 - consumo diario g/ave (día 0..42) */
+const cobb500_g = [13,17,21,23,27,31,35,39,44,48,54,58,64,68,75,81,87,93,98,105,111,117,123,130,134,141,148,152,158,163,169,174,180,182,189,193,197,201,205,209,213,216];
+/* COBB 500 - peso g por día (opcional, sólo para sugerir peso si usuario no lo pone) */
+const cobb500_peso_g = [42,56,72,92,109,131,157,185,215,247,283,321,362,412,465,524,580,651,719,790,865,943,1023,1104,1186,1253,1358,1440,1524,1613,1705,1803,1895,1996,2099,2191,2289,2386,2482,2577,2671,2764,2857];
+
+/* ROSS 308 - consumo diario g/ave (día 0..42) — versión final (el '18' fue quitado) */
+const ross308_g = [12,16,19,20,24,27,31,35,39,44,49,52,57,60,63,60,67,72,77,83,88,94,99,105,111,117,122,128,134,139,145,150,155,161,166,171,176,182,187,193,198,204,207];
+/* ROSS 308 - peso g por día (opcional) */
+const ross308_peso_g = [44,62,81,102,125,151,181,213,249,288,330,376,425,477,533,592,655,720,789,860,935,1012,1092,1174,1258,1345,1434,1524,1616,1710,1805,1901,1999,2097,2196,2296,2396,2496,2597,2697,2798,2898,2998];
+
+/* conversión precisa g -> lb */
+const gToLb = g => g / 453.59237;
+
+/* mapear a objetos con consumo en lb y peso en lb */
+const cobb = cobb500_g.map((g,i) => ({
+  dia: i,
+  consumo_lb: gToLb(g),
+  peso_lb: (cobb500_peso_g[i] || cobb500_peso_g[cobb500_peso_g.length-1]) / 453.59237
+}));
+const ross = ross308_g.map((g,i) => ({
+  dia: i,
+  consumo_lb: gToLb(g),
+  peso_lb: (ross308_peso_g[i] || ross308_peso_g[ross308_peso_g.length-1]) / 453.59237
+}));
+
+let datosSeleccionados = [];
+let grafica1 = null;
+
+/* iniciar calculadora */
+function iniciarCalculadora(){
+  const linea = document.getElementById('lineaGenetica').value;
+  const tipo = document.getElementById('tipoTabla').value;
+  if(!document.getElementById('nombreGalpon').value){ alert('Ingrese nombre del galpón'); return; }
+  datosSeleccionados = (linea === 'cobb') ? cobb.slice() : ross.slice();
+  if(tipo === 'suavizado'){
+    datosSeleccionados = datosSeleccionados.map(d => ({ dia:d.dia, consumo_lb: d.consumo_lb * 1.03, peso_lb: d.peso_lb }));
+  }
+  document.getElementById('pantalla-inicial').style.display='none';
+  document.getElementById('calculadora').style.display='block';
+}
+
+/* calcular fases */
+function calcularFases(diasTotales){
+  const fases = { pre:{ini:0,fin:-1}, inicio:{ini:0,fin:-1}, cre:{ini:0,fin:-1}, eng:{ini:0,fin:-1} };
+  if(diasTotales <= 0) return fases;
+  fases.pre.ini = 0;
+  fases.pre.fin = Math.min(7, diasTotales - 1);
+  fases.eng.ini = Math.max(0, diasTotales - 7);
+  fases.eng.fin = diasTotales -1;
+  const centroIni = fases.pre.fin + 1;
+  const centroFin = fases.eng.ini - 1;
+  if(centroIni <= centroFin){
+    const totalCentro = centroFin - centroIni + 1;
+    const mitad = Math.floor(totalCentro / 2);
+    fases.inicio.ini = centroIni;
+    fases.inicio.fin = centroIni + mitad - 1;
+    fases.cre.ini = fases.inicio.fin + 1;
+    fases.cre.fin = centroFin;
+  } else {
+    fases.inicio.ini = 0; fases.inicio.fin = -1;
+    fases.cre.ini = 0; fases.cre.fin = -1;
+  }
+  return fases;
+}
+
+/* cálculo principal — corrección aves vivas lineal para que la mortalidad final sea exacta */
+function calcular(){
+  const avesInput = Number(document.getElementById('aves').value) || 0;
+  let diasTotales = Number(document.getElementById('dias').value) || 0;
+  const mort = Number(document.getElementById('mort').value) || 0;
+  const precioAlimento = Number(document.getElementById('precioAlimento').value) || 0; // USD / lb
+  const precioPollo = Number(document.getElementById('precioPollo').value) || 0; // USD / lb
+  const precioPollito = Number(document.getElementById('precioPollito').value) || 0; // USD / ave
+  const pesoFinalEntrada = Number(document.getElementById('pesoFinalAve').value) || 0; // lb optional
+
+  if(avesInput <= 0 || diasTotales <= 0){ alert('Ingrese aves y días válidos'); return; }
+
+  // limitar a la longitud de la tabla seleccionada
+  if(diasTotales > datosSeleccionados.length) diasTotales = datosSeleccionados.length;
+
+  const mortTotal = mort / 100;
+
+  // aves vivas por día: distribuimos linealmente desde 0 hasta diasTotales-1,
+  // de modo que el último día tenga avesInput*(1 - mortTotal)
+  const avesVivasPorDia = [];
+  for(let d=0; d<diasTotales; d++){
+    let frac = 0;
+    if(diasTotales > 1) frac = d / (diasTotales - 1); // d=0 -> 0; d=last -> 1
+    const avesVivas = avesInput * (1 - mortTotal * frac);
+    avesVivasPorDia.push(avesVivas);
+  }
+
+  const fases = calcularFases(diasTotales);
+  // mostrar rangos en UI
+  document.getElementById('diasPre').innerText = `${fases.pre.ini} - ${fases.pre.fin}`;
+  document.getElementById('diasIni').innerText = (fases.inicio.fin >= fases.inicio.ini) ? `${fases.inicio.ini} - ${fases.inicio.fin}` : '-';
+  document.getElementById('diasCre').innerText = (fases.cre.fin >= fases.cre.ini) ? `${fases.cre.ini} - ${fases.cre.fin}` : '-';
+  document.getElementById('diasEng').innerText = `${fases.eng.ini} - ${fases.eng.fin}`;
+
+  // acumular consumo por fase (lb)
+  let consumoPre = 0, consumoIni = 0, consumoCre = 0, consumoEng = 0;
+  for(let d=0; d<diasTotales; d++){
+    const fila = datosSeleccionados[d];
+    if(!fila) continue;
+    const consumoDiaAve_lb = fila.consumo_lb;
+    const avesVivas = avesVivasPorDia[d] || avesInput;
+    const consumoDiaTotal_lb = consumoDiaAve_lb * avesVivas;
+
+    if(d <= fases.pre.fin) consumoPre += consumoDiaTotal_lb;
+    else if(d >= fases.eng.ini) consumoEng += consumoDiaTotal_lb;
+    else if(d >= fases.inicio.ini && d <= fases.inicio.fin) consumoIni += consumoDiaTotal_lb;
+    else if(d >= fases.cre.ini && d <= fases.cre.fin) consumoCre += consumoDiaTotal_lb;
+    else consumoCre += consumoDiaTotal_lb;
+  }
+
+  // mostrar en inputs (solo lb)
+  document.getElementById('consumoPre').value = `${consumoPre.toFixed(2)} lb`;
+  document.getElementById('consumoIni').value = `${consumoIni.toFixed(2)} lb`;
+  document.getElementById('consumoCre').value = `${consumoCre.toFixed(2)} lb`;
+  document.getElementById('consumoEng').value = `${consumoEng.toFixed(2)} lb`;
+
+  const consumoTotal_lb = consumoPre + consumoIni + consumoCre + consumoEng;
+
+  // aves finales exactas según mortTotal
+  const avesFinales = Math.round(avesInput * (1 - mortTotal));
+
+  // peso final por ave: usar input si existe, si no tomar peso de la tabla en el día final
+  const linea = document.getElementById('lineaGenetica').value;
+  const tablaRef = (linea === 'cobb') ? cobb : ross;
+  const idxFinal = Math.min(diasTotales - 1, tablaRef.length - 1);
+  const pesoFinalTabla_lb = tablaRef[idxFinal] ? (tablaRef[idxFinal].peso_lb) : (tablaRef[tablaRef.length-1].peso_lb || 0);
+  const pesoFinalAve_lb = pesoFinalEntrada > 0 ? pesoFinalEntrada : pesoFinalTabla_lb;
+
+  // costos e ingresos (todo en lb y USD)
+  const costoAlimento = consumoTotal_lb * precioAlimento;
+  const costoPollitos = avesInput * precioPollito;
+  const ingreso = avesFinales * pesoFinalAve_lb * precioPollo;
+  const ganancia = ingreso - (costoAlimento + costoPollitos);
+
+  // FCR: feed / weight gain (en lb)
+  // peso ganado por ave: si no hay peso final o inicial apropiado, FCR queda N/A
+  const pesoInicialTabla_lb = tablaRef[0] ? tablaRef[0].peso_lb : 0;
+  const pesoGanadoPorAve_lb = Math.max(0, pesoFinalAve_lb - pesoInicialTabla_lb);
+  const pesoGanadoTotal_lb = avesFinales * pesoGanadoPorAve_lb;
+  const FCR = (pesoGanadoTotal_lb > 0) ? (consumoTotal_lb / pesoGanadoTotal_lb) : NaN;
+
+  // mostrar resultados
+  document.getElementById('resultados').innerHTML = `
+    <div class="results-pre">
+      <p><b>Aves iniciales:</b> ${avesInput}</p>
+      <p><b>Aves finales (estim.):</b> ${avesFinales}</p>
+      <p><b>Peso final por ave (lb):</b> ${pesoFinalAve_lb.toFixed(3)}</p>
+    </div>
+
+    <div class="results-pre">
+      <p><b>Consumo total:</b> ${consumoTotal_lb.toFixed(2)} lb</p>
+      <p><b>Consumo por fase (lb):</b> Pre:${consumoPre.toFixed(2)} / Ini:${consumoIni.toFixed(2)} / Cre:${consumoCre.toFixed(2)} / Eng:${consumoEng.toFixed(2)}</p>
+      <p><b>Peso ganado total (lb):</b> ${pesoGanadoTotal_lb.toFixed(2)} lb</p>
+      <p><b>FCR (feed / weight gain):</b> ${isFinite(FCR) ? FCR.toFixed(3) : 'N/A'}</p>
+    </div>
+
+    <div class="results-pre">
+      <p><b>Costo alimento:</b> $${costoAlimento.toFixed(2)}</p>
+      <p><b>Costo pollitos:</b> $${costoPollitos.toFixed(2)}</p>
+      <p><b>Ingreso estimado venta:</b> $${ingreso.toFixed(2)}</p>
+      <p><b>Ganancia neta:</b> $${ganancia.toFixed(2)}</p>
+    </div>
+  `;
+
+  generarGrafica([consumoPre, consumoIni, consumoCre, consumoEng]);
+}
+
+/* generar gráfica */
+function generarGrafica(consumos){
+  if(grafica1) grafica1.destroy();
+  const ctx = document.getElementById('graficaConsumo').getContext('2d');
+  grafica1 = new Chart(ctx, {
+    type:'bar',
+    data:{ labels:['Preinicio','Inicio','Crecimiento','Engorde'], datasets:[{ label:'Consumo por fase (lb)', data:consumos, backgroundColor:['#0a7cff','#05a857','#f59e0b','#ef4444'] }]},
+    options:{ responsive:true, plugins:{ legend:{ display:false } } }
+  });
+}
+
+/* guardar / cargar lotes */
+function guardarLote(){
+  const resultadosText = document.getElementById('resultados').innerText;
+  if(!resultadosText){ alert('Primero calcula resultados.'); return; }
+  const lotes = JSON.parse(localStorage.getItem('lotesAvicolas') || '[]');
+  lotes.push({ fecha: new Date().toLocaleString(), nombre: document.getElementById('nombreGalpon').value || 'Sin nombre', resultados: resultadosText });
+  localStorage.setItem('lotesAvicolas', JSON.stringify(lotes));
+  cargarLotes();
+}
+function cargarLotes(){
+  const lotes = JSON.parse(localStorage.getItem('lotesAvicolas') || '[]');
+  const lista = document.getElementById('listaLotes');
+  lista.innerHTML = '';
+  lotes.forEach((l,i) => lista.innerHTML += `<li><b>Lote ${i+1} (${l.fecha}):</b> ${l.resultados}</li>`);
+}
+cargarLotes();
+
+/* limpiar / volver */
+function limpiarCalculadora(){
+  ['aves','dias','mort','precioPollito','precioAlimento','precioPollo','pesoFinalAve','consumoPre','consumoIni','consumoCre','consumoEng'].forEach(id=>{
+    const el = document.getElementById(id); if(el) el.value = '';
+  });
+  document.getElementById('resultados').innerHTML = '';
+  if(grafica1) grafica1.destroy();
+}
+function volverMenu(){ limpiarCalculadora(); document.getElementById('calculadora').style.display='none'; document.getElementById('pantalla-inicial').style.display='block'; }
+
+/* generar PDF simple */
+async function generarPDF(){
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF('p','pt','a4'); pdf.setFontSize(16); pdf.text('Reporte Avícola - Consumo Diario',40,40);
+  let y=70;
+  const resultados = document.getElementById('resultados');
+  if(resultados){
+    const lines = pdf.splitTextToSize(resultados.innerText,520);
+    pdf.text(lines,40,y); y += lines.length*12 + 10;
+  }
+  const canvas = document.getElementById('graficaConsumo');
+  if(canvas){
+    const img = canvas.toDataURL('image/png',1.0);
+    if(y+260 > 800){ pdf.addPage(); y = 40; }
+    pdf.addImage(img,'PNG',40,y,520,260);
+  }
+  pdf.save('reporte_avicola_real.pdf');
+}
+</script>
+</body>
+</html>
